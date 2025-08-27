@@ -1,5 +1,6 @@
 use crate::request::Request;
 use crate::server_state::ServerState;
+use mysql::Pool;
 use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
@@ -10,9 +11,9 @@ pub struct Server {
 }
 
 impl Server {
-    pub fn new() -> Self {
+    pub fn new(pool: Pool) -> Self {
         Server {
-            state: Arc::new(Mutex::new(ServerState::new())),
+            state: Arc::new(Mutex::new(ServerState::new(pool))),
         }
     }
 
@@ -28,7 +29,7 @@ impl Server {
                                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
                                 format!(
                                     "ID: {}, Name: {}, Age: {}",
-                                    person.id, person.name, person.age
+                                    person.id, person.name, person.email
                                 ),
                             ),
                             None => (
@@ -43,7 +44,7 @@ impl Server {
             ("POST", "/person") => {
                 let params = request.parse_body();
                 let name = match params.get("name") {
-                    Some(name) => name,
+                    Some(name) => name.clone(),
                     None => {
                         return (
                             "HTTP/1.1 400 BAD REQUEST\r\n\r\n",
@@ -62,7 +63,7 @@ impl Server {
                 };
 
                 let mut state = self.state.lock().unwrap();
-                let id = state.add_person(name.to_string(), age);
+                let id = state.add_person(name, age);
                 (
                     "HTTP/1.1 201 CREATED\r\nContent-Type: text/plain\r\n\r\n",
                     format!("Person created with ID: {}", id),
@@ -74,7 +75,7 @@ impl Server {
                     Ok(id) => {
                         let params = request.parse_body();
                         let name = match params.get("name") {
-                            Some(name) => name,
+                            Some(name) => name.clone(),
                             None => {
                                 return (
                                     "HTTP/1.1 400 BAD REQUEST\r\n\r\n",
@@ -93,7 +94,7 @@ impl Server {
                         };
 
                         let mut state = self.state.lock().unwrap();
-                        if state.update_person(id, name.to_string(), age) {
+                        if state.update_person(id, name, age) {
                             (
                                 "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
                                 "Person updated".to_string(),
