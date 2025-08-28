@@ -2,7 +2,7 @@ use crate::model::person::Person;
 use mysql::{Pool, params, prelude::*};
 
 pub struct ServerState {
-    pool: Pool,
+    pub pool: Pool,
 }
 
 impl ServerState {

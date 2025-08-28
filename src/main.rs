@@ -1,4 +1,6 @@
 mod config;
+mod data_generator;
+mod data_inserter;
 mod model;
 mod request;
 mod server;
@@ -13,5 +15,9 @@ fn main() {
     let config = Config::load();
     let pool = Pool::new(config.database.url.as_str()).unwrap();
     let server = Server::new(pool);
-    server.run("127.0.0.1:8080");
+    server.run(&format!(
+        "{}:{}",
+        &config.server.host,
+        &config.server.port.to_string()
+    ));
 }

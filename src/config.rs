@@ -4,11 +4,18 @@ use std::fs;
 #[derive(Deserialize)]
 pub struct Config {
     pub database: DatabaseConfig,
+    pub server: ServerConfig,
 }
 
 #[derive(Deserialize)]
 pub struct DatabaseConfig {
     pub url: String,
+}
+
+#[derive(Deserialize)]
+pub struct ServerConfig {
+    pub host: String,
+    pub port: u16,
 }
 
 impl Config {
