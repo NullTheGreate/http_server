@@ -3,28 +3,26 @@ use mysql::{Pool, TxOpts, params, prelude::*};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
+use tokio::task;
 
-pub struct DataInserter {
+pub struct DataInserterWithTokio {
     pool: Pool,
 }
 
-impl DataInserter {
+impl DataInserterWithTokio {
     pub fn new(pool: Pool) -> Self {
-        DataInserter { pool }
+        DataInserterWithTokio { pool }
     }
 
-    pub fn populate(&self, count: u32) -> mysql::Result<Duration> {
+    pub async fn populate(&self, count: u32) -> mysql::Result<Duration> {
         let start_time = Instant::now();
-        // const BATCH_SIZE: u32 = 1000;
+        const BATCH_SIZE: u32 = 1000;
         const GENERATOR_THREADS: u32 = 4;
         const INSERTER_THREADS: u32 = 2;
 
         let (tx, rx): (Sender<Vec<Person>>, Receiver<Vec<Person>>) = std::sync::mpsc::channel();
         let rx = Arc::new(Mutex::new(rx));
         let mut generator_handles = vec![];
-        let mut inserter_handles = vec![];
-
-        // Start generator threads
         let chunk_size =
             count / GENERATOR_THREADS + if count % GENERATOR_THREADS > 0 { 1 } else { 0 };
         for i in 0..GENERATOR_THREADS {
@@ -39,17 +37,18 @@ impl DataInserter {
             }
             let tx = tx.clone();
             let generator = crate::data_generator::DataGenerator::new();
-            generator_handles.push(std::thread::spawn(move || {
+            generator_handles.push(task::spawn_blocking(move || {
                 generator.generate(generate_count, start_id, tx);
+                () // Explicitly return () to clarify closure return type
             }));
         }
 
-        // Start inserter threads
         let pool = self.pool.clone();
+        let mut inserter_handles = vec![];
         for _ in 0..INSERTER_THREADS {
             let rx = Arc::clone(&rx);
             let pool = pool.clone();
-            inserter_handles.push(std::thread::spawn(move || {
+            inserter_handles.push(task::spawn_blocking(move || {
                 let mut conn = match pool.get_conn() {
                     Ok(conn) => conn,
                     Err(e) => {
@@ -81,10 +80,8 @@ impl DataInserter {
                         }
                     };
 
-                    let params: Vec<_> = persons
-                        .into_iter()
-                        .map(|p| {
-                            params! {
+                    let params: Vec<_> = persons.into_iter().map(|p| {
+                        params! {
                                 "name" => p.name,
                                 "email" => p.email,
                                 "phone" => p.phone,
@@ -93,8 +90,7 @@ impl DataInserter {
                                 "state" => p.state,
                                 "version" => p.version,
                             }
-                        })
-                        .collect();
+                    }).collect();
 
                     if let Err(e) = tx.exec_batch(
                         "INSERT INTO person (name, email, phone, address, city, state, version) VALUES (:name, :email, :phone, :address, :city, :state, :version)",
@@ -113,8 +109,8 @@ impl DataInserter {
 
         // Wait for generators to finish
         for handle in generator_handles {
-            if let Err(e) = handle.join() {
-                eprintln!("Generator thread failed: {:?}", e);
+            if let Err(e) = handle.await {
+                eprintln!("Generator task failed: {:?}", e);
             }
         }
 
@@ -123,8 +119,8 @@ impl DataInserter {
 
         // Wait for inserters to finish
         for handle in inserter_handles {
-            if let Err(e) = handle.join() {
-                eprintln!("Inserter thread failed: {:?}", e);
+            if let Err(e) = handle.await {
+                eprintln!("Inserter task failed: {:?}", e);
             }
         }
 

@@ -1,4 +1,5 @@
 use crate::data_inserter::DataInserter;
+use crate::data_inserter_with_tokio::DataInserterWithTokio;
 use crate::request::Request;
 use crate::server_state::ServerState;
 use mysql::Pool;
@@ -6,15 +7,18 @@ use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use tokio::runtime::Runtime;
 
 pub struct Server {
     state: Arc<Mutex<ServerState>>,
+    rt: Runtime,
 }
 
 impl Server {
     pub fn new(pool: Pool) -> Self {
         Server {
             state: Arc::new(Mutex::new(ServerState::new(pool))),
+            rt: Runtime::new().unwrap(),
         }
     }
 
@@ -133,9 +137,20 @@ impl Server {
                     }
                 };
 
-                let state = self.state.lock().unwrap();
-                let inserter = DataInserter::new(state.pool.clone());
-                match inserter.populate(count) {
+                let state = self.state.lock();
+                let state = match state {
+                    Ok(state) => state,
+                    Err(e) => {
+                        eprintln!("Failed to lock server state: {}", e);
+                        return (
+                            "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n",
+                            "Server error".to_string(),
+                        );
+                    }
+                };
+
+                let inserter = DataInserterWithTokio::new(state.pool.clone());
+                match self.rt.block_on(inserter.populate(count)) {
                     Ok(duration) => (
                         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
                         format!("Successfully populated {} records in {:?}", count, duration),
@@ -198,6 +213,7 @@ impl Clone for Server {
     fn clone(&self) -> Self {
         Server {
             state: Arc::clone(&self.state),
+            rt: Runtime::new().unwrap(),
         }
     }
 }
