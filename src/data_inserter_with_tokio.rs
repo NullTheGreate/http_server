@@ -1,4 +1,4 @@
-use crate::model::person::Person;
+use crate::model::person::{self, Person};
 use mysql::{Pool, TxOpts, params, prelude::*};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -21,14 +21,18 @@ impl DataInserterWithTokio {
         const INSERTER_THREADS: u32 = 2;
 
         let (tx, rx): (Sender<Vec<Person>>, Receiver<Vec<Person>>) = std::sync::mpsc::channel();
-        let rx = Arc::new(Mutex::new(rx));
+        let rx: Arc<Mutex<Receiver<Vec<Person>>>> = Arc::new(Mutex::new(rx));
         let mut generator_handles = vec![];
         let chunk_size =
             count / GENERATOR_THREADS + if count % GENERATOR_THREADS > 0 { 1 } else { 0 };
         for i in 0..GENERATOR_THREADS {
             let start_id = i * chunk_size;
             let generate_count = if i == GENERATOR_THREADS - 1 {
-                count - (i * chunk_size)
+                if count - (i * chunk_size) > chunk_size {
+                    chunk_size
+                } else {
+                    count - (i * chunk_size)
+                }
             } else {
                 chunk_size
             };
@@ -39,7 +43,7 @@ impl DataInserterWithTokio {
             let generator = crate::data_generator::DataGenerator::new();
             generator_handles.push(task::spawn_blocking(move || {
                 generator.generate(generate_count, start_id, tx);
-                () // Explicitly return () to clarify closure return type
+                // () // Explicitly return () to clarify closure return type
             }));
         }
 
@@ -80,25 +84,30 @@ impl DataInserterWithTokio {
                         }
                     };
 
-                    let params: Vec<_> = persons.into_iter().map(|p| {
+                    for person in persons.chunks(BATCH_SIZE as usize)  {
+                        let params: Vec<_> = person.iter().map(|p| {
                         params! {
-                                "name" => p.name,
-                                "email" => p.email,
-                                "phone" => p.phone,
-                                "address" => p.address,
-                                "city" => p.city,
-                                "state" => p.state,
+                                "name" => &p.name,
+                                "email" => &p.email,
+                                "phone" => &p.phone,
+                                "address" => &p.address,
+                                "city" => &p.city,
+                                "state" => &p.state,
                                 "version" => p.version,
                             }
-                    }).collect();
-
-                    if let Err(e) = tx.exec_batch(
+                        }).collect();
+                        if let Err(e) = tx.exec_batch(
                         "INSERT INTO person (name, email, phone, address, city, state, version) VALUES (:name, :email, :phone, :address, :city, :state, :version)",
                         params.iter(),
                     ) {
                         eprintln!("Failed to execute batch insert: {}", e);
                         return;
                     }
+                    }
+
+                    
+
+                    
                 }
 
                 if let Err(e) = tx.commit() {

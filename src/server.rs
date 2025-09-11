@@ -161,6 +161,53 @@ impl Server {
                     ),
                 }
             }
+            ("POST", path) if path.starts_with("/populate2") => {
+                let query = path.split('?').nth(1).unwrap_or("");
+                let params: std::collections::HashMap<String, String> = query
+                    .split('&')
+                    .filter_map(|pair| {
+                        let kv: Vec<&str> = pair.splitn(2, '=').collect();
+                        if kv.len() == 2 {
+                            Some((kv[0].to_string(), kv[1].to_string()))
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                let count = match params.get("count").and_then(|c| c.parse::<u32>().ok()) {
+                    Some(count) => count,
+                    None => {
+                        return (
+                            "HTTP/1.1 400 BAD REQUEST\r\n\r\n",
+                            "Missing or invalid count parameter".to_string(),
+                        );
+                    }
+                };
+
+                let state = self.state.lock();
+                let state = match state {
+                    Ok(state) => state,
+                    Err(e) => {
+                        eprintln!("Failed to lock server state: {}", e);
+                        return (
+                            "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n",
+                            "Server error".to_string(),
+                        );
+                    }
+                };
+
+                let inserter = DataInserter::new(state.pool.clone());
+                match inserter.populate(count) {
+                    Ok(_) => (
+                        "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
+                        format!("Successfully populated {} records", count),
+                    ),
+                    Err(e) => (
+                        "HTTP/1.1 500 INTERNAL SERVER ERROR\r\n\r\n",
+                        format!("Failed to populate records: {}", e),
+                    ),
+                }
+            }
             _ => (
                 "HTTP/1.1 404 NOT FOUND\r\n\r\n",
                 "404 - Endpoint not found".to_string(),
