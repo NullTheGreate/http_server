@@ -1,4 +1,4 @@
-use crate::model::person::{self, Person};
+use crate::model::person::Person;
 use mysql::{Pool, TxOpts, params, prelude::*};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -17,7 +17,7 @@ impl DataInserterWithTokio {
     pub async fn populate(&self, count: u32) -> mysql::Result<Duration> {
         let start_time = Instant::now();
         const BATCH_SIZE: u32 = 1000;
-        const GENERATOR_THREADS: u32 = 4;
+        const GENERATOR_THREADS: u32 = 10;
         const INSERTER_THREADS: u32 = 2;
 
         let (tx, rx): (Sender<Vec<Person>>, Receiver<Vec<Person>>) = std::sync::mpsc::channel();
@@ -103,9 +103,8 @@ impl DataInserterWithTokio {
                         eprintln!("Failed to execute batch insert: {}", e);
                         return;
                     }
-                    }
-
-                    
+                        println!("Inserted {} records", person.len());
+                    }                   
 
                     
                 }
