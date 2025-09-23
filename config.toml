@@ -2,3 +2,4 @@ database.url = "mysql://user:password@127.0.0.1:3306/db"
 [server]
 host = "localhost"
 port = 8080
+rate_limit_per_second = 100

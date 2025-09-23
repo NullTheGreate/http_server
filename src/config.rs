@@ -5,6 +5,7 @@ use std::fs;
 pub struct Config {
     pub database: DatabaseConfig,
     pub server: ServerConfig,
+    pub rate_limit: u32,
 }
 
 #[derive(Deserialize)]

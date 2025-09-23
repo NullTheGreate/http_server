@@ -1,5 +1,9 @@
+use crate::config::{self, Config};
 use crate::model::person::Person;
+use governor::{Quota, RateLimiter};
 use mysql::{Pool, TxOpts, params, prelude::*};
+use nonzero_ext::nonzero;
+use std::num::NonZeroU32;
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -7,11 +11,12 @@ use tokio::task;
 
 pub struct DataInserterWithTokio {
     pool: Pool,
+    config: Arc<Config>,
 }
 
 impl DataInserterWithTokio {
-    pub fn new(pool: Pool) -> Self {
-        DataInserterWithTokio { pool }
+    pub fn new(pool: Pool, config: Arc<Config>) -> Self {
+        DataInserterWithTokio { pool, config }
     }
 
     pub async fn populate(&self, count: u32) -> mysql::Result<Duration> {
@@ -19,6 +24,14 @@ impl DataInserterWithTokio {
         const BATCH_SIZE: u32 = 1000;
         const GENERATOR_THREADS: u32 = 10;
         const INSERTER_THREADS: u32 = 2;
+
+         let rate_limit = match NonZeroU32::new(self.config.rate_limit) {
+            Some(nz) => nz,
+            None => nonzero!(100u32), // Default to 100 if rate_limit is 0
+        };
+
+        let quota = Quota::per_second(rate_limit);
+        let limiter = Arc::new(RateLimiter::direct(quota));
 
         let (tx, rx): (Sender<Vec<Person>>, Receiver<Vec<Person>>) = std::sync::mpsc::channel();
         let rx: Arc<Mutex<Receiver<Vec<Person>>>> = Arc::new(Mutex::new(rx));
@@ -52,6 +65,8 @@ impl DataInserterWithTokio {
         for _ in 0..INSERTER_THREADS {
             let rx = Arc::clone(&rx);
             let pool = pool.clone();
+            let limiter = Arc::clone(&limiter);
+
             inserter_handles.push(task::spawn_blocking(move || {
                 let mut conn = match pool.get_conn() {
                     Ok(conn) => conn,
@@ -85,6 +100,9 @@ impl DataInserterWithTokio {
                     };
 
                     for person in persons.chunks(BATCH_SIZE as usize)  {
+
+                        limiter.until_ready().await;
+
                         let params: Vec<_> = person.iter().map(|p| {
                         params! {
                                 "name" => &p.name,
