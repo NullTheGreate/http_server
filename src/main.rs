@@ -7,6 +7,8 @@ mod request;
 mod server;
 mod server_state;
 
+use std::sync::Arc;
+
 use mysql::Pool;
 use server::Server;
 // use tokio::task::JoinHandle;
@@ -15,9 +17,9 @@ use crate::config::Config;
 
 // #[tokio::main]
 fn main() {
-    let config = Config::load();
+    let config = Arc::new(Config::load());
     let pool = Pool::new(config.database.url.as_str()).unwrap();
-    let server = Server::new(pool);
+    let server = Server::new(pool, config.clone());
     server.run(&format!(
         "{}:{}",
         &config.server.host,

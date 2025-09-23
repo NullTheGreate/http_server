@@ -1,3 +1,4 @@
+use crate::config::{self, Config};
 use crate::data_inserter::DataInserter;
 use crate::data_inserter_with_tokio::DataInserterWithTokio;
 use crate::request::Request;
@@ -12,13 +13,15 @@ use tokio::runtime::Runtime;
 pub struct Server {
     state: Arc<Mutex<ServerState>>,
     rt: Runtime,
+    config: Arc<Config>,
 }
 
 impl Server {
-    pub fn new(pool: Pool) -> Self {
+    pub fn new(pool: Pool, config: Arc<Config>) -> Self {
         Server {
             state: Arc::new(Mutex::new(ServerState::new(pool))),
             rt: Runtime::new().unwrap(),
+            config,
         }
     }
 
@@ -149,7 +152,8 @@ impl Server {
                     }
                 };
 
-                let inserter = DataInserterWithTokio::new(state.pool.clone());
+                let inserter =
+                    DataInserterWithTokio::new(state.pool.clone(), Arc::clone(&self.config));
                 match self.rt.block_on(inserter.populate(count)) {
                     Ok(duration) => (
                         "HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\n\r\n",
@@ -261,6 +265,7 @@ impl Clone for Server {
         Server {
             state: Arc::clone(&self.state),
             rt: Runtime::new().unwrap(),
+            config: Arc::clone(&self.config),
         }
     }
 }

@@ -1,4 +1,4 @@
-use crate::config::{self, Config};
+use crate::config::Config;
 use crate::model::person::Person;
 use governor::{Quota, RateLimiter};
 use mysql::{Pool, TxOpts, params, prelude::*};
@@ -67,7 +67,7 @@ impl DataInserterWithTokio {
             let pool = pool.clone();
             let limiter = Arc::clone(&limiter);
 
-            inserter_handles.push(task::spawn_blocking(move || {
+            inserter_handles.push(task::spawn_blocking(async move || {
                 let mut conn = match pool.get_conn() {
                     Ok(conn) => conn,
                     Err(e) => {
